@@ -36,5 +36,11 @@
   padding: 10px;
   background-color: #1a1a1a;
   border-radius: 4px;
+  position: relative;
+}
+
+.drop-zone-active {
+  background-color: rgba(74, 138, 74, 0.2);
+  border-radius: 2px;
 }
 
