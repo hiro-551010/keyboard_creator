@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Key, KeyboardLayout, KeySize } from '../../types/keyboard';
-import { createKey, hasKeyAtPosition, removeKey } from '../../utils/layoutUtils';
+import { createKey, hasKeyAtPosition, removeKey, updateKey } from '../../utils/layoutUtils';
 import { KeySlot } from './KeySlot';
 import './KeyGridEditor.css';
 
@@ -21,6 +21,9 @@ export const KeyGridEditor: React.FC<KeyGridEditorProps> = ({
 }) => {
   const [selectedSize, setSelectedSize] = useState<KeySize>(1);
   const [hoveredPosition, setHoveredPosition] = useState<{ row: number; col: number } | null>(null);
+  const [draggedKey, setDraggedKey] = useState<Key | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const targetHalf = half === 'left' ? layout.left : layout.right;
 
@@ -61,6 +64,99 @@ export const KeyGridEditor: React.FC<KeyGridEditorProps> = ({
     ) || null;
   };
 
+  // ドラッグ開始時の処理
+  const handleDragStart = (e: React.DragEvent, key: Key) => {
+    setDraggedKey(key);
+    // ドラッグ中の視覚的フィードバック用に半透明にする
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.style.opacity = '0.5';
+    }
+  };
+
+  // ドラッグ終了時の処理
+  const handleDragEnd = () => {
+    setDraggedKey(null);
+    setDragOffset(null);
+    // すべてのキースロットの透明度をリセット
+    if (gridRef.current) {
+      const slots = gridRef.current.querySelectorAll('.key-slot');
+      slots.forEach(slot => {
+        if (slot instanceof HTMLElement) {
+          slot.style.opacity = '1';
+        }
+      });
+    }
+  };
+
+  // ドラッグ中の処理（グリッド上でマウスを移動）
+  const handleDragOver = (e: React.DragEvent, row: number, col: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    
+    if (draggedKey && gridRef.current) {
+      // グリッドセル内のマウス位置を取得
+      const gridRect = gridRef.current.getBoundingClientRect();
+      const gridPadding = 10; // padding分を考慮
+      const gridGap = 2; // gap分を考慮
+      const availableWidth = gridRect.width - (gridPadding * 2);
+      const availableHeight = gridRect.height - (gridPadding * 2);
+      const cellWidth = (availableWidth - (gridGap * (gridCols - 1))) / gridCols;
+      const cellHeight = (availableHeight - (gridGap * (gridRows - 1))) / gridRows;
+      
+      // マウス位置をグリッド座標系に変換（paddingを考慮）
+      const mouseX = e.clientX - gridRect.left - gridPadding;
+      const mouseY = e.clientY - gridRect.top - gridPadding;
+      
+      // 現在のセル内の相対位置を計算
+      const cellStartX = col * (cellWidth + gridGap);
+      const cellStartY = row * (cellHeight + gridGap);
+      const relativeX = mouseX - cellStartX;
+      const relativeY = mouseY - cellStartY;
+      
+      // セル内の相対位置（0.0 ～ 1.0）を計算
+      const cellX = relativeX / cellWidth;
+      const cellY = relativeY / cellHeight;
+      
+      // オフセットを計算（セル中央を0とする、-0.5 ～ 0.5の範囲）
+      // 0.8を掛けてセル外にはみ出さないようにする
+      const offsetX = Math.max(-0.4, Math.min(0.4, (cellX - 0.5) * 0.8));
+      const offsetY = Math.max(-0.4, Math.min(0.4, (cellY - 0.5) * 0.8));
+      
+      setDragOffset({ x: offsetX, y: offsetY });
+      setHoveredPosition({ row, col });
+    }
+  };
+
+  // ドロップ時の処理
+  const handleDrop = (e: React.DragEvent, row: number, col: number) => {
+    e.preventDefault();
+    
+    if (draggedKey && dragOffset) {
+      // 新しい位置を計算
+      const newPosition = {
+        row,
+        col,
+        offsetX: dragOffset.x,
+        offsetY: dragOffset.y,
+      };
+      
+      // キーの位置を更新
+      const updatedLayout = updateKey(layout, half, draggedKey.id, {
+        position: newPosition,
+      });
+      
+      onLayoutChange(updatedLayout);
+    } else if (draggedKey) {
+      // オフセットなしで位置のみ更新
+      const updatedLayout = updateKey(layout, half, draggedKey.id, {
+        position: { row, col },
+      });
+      onLayoutChange(updatedLayout);
+    }
+    
+    handleDragEnd();
+  };
+
   return (
     <div className="key-grid-editor">
       <div className="grid-controls">
@@ -82,28 +178,44 @@ export const KeyGridEditor: React.FC<KeyGridEditorProps> = ({
           </select>
         </label>
         <div className="instructions">
-          <p>Click to add key, Right-click to remove</p>
+          <p>Click to add key, Right-click to remove, Drag to move</p>
         </div>
       </div>
       <div
+        ref={gridRef}
         className="key-grid"
         style={{
           gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
           gridTemplateRows: `repeat(${gridRows}, 1fr)`,
         }}
+        onDragLeave={() => {
+          setHoveredPosition(null);
+          setDragOffset(null);
+        }}
       >
         {Array.from({ length: gridRows }, (_, row) =>
           Array.from({ length: gridCols }, (_, col) => {
             const key = getKeyAtPosition(row, col);
+            const isDragOver = hoveredPosition?.row === row && hoveredPosition?.col === col;
             return (
-              <KeySlot
+              <div
                 key={`${row}-${col}`}
-                keyData={key}
-                position={{ row, col }}
-                size={key?.size || selectedSize}
-                onClick={() => handleSlotClick(row, col)}
-                onRightClick={() => handleSlotRightClick(row, col)}
-              />
+                onDragOver={(e) => handleDragOver(e, row, col)}
+                onDrop={(e) => handleDrop(e, row, col)}
+                className={isDragOver ? 'drop-zone-active' : ''}
+              >
+                <KeySlot
+                  keyData={key}
+                  position={{ row, col }}
+                  size={key?.size || selectedSize}
+                  onClick={() => handleSlotClick(row, col)}
+                  onRightClick={() => handleSlotRightClick(row, col)}
+                  onDragStart={(e) => key && handleDragStart(e, key)}
+                  onDragEnd={handleDragEnd}
+                  draggable={!!key}
+                  dragOffset={isDragOver && dragOffset ? dragOffset : (key?.position.offsetX !== undefined || key?.position.offsetY !== undefined) ? { x: key.position.offsetX ?? 0, y: key.position.offsetY ?? 0 } : null}
+                />
+              </div>
             );
           })
         )}

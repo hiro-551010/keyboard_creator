@@ -33,8 +33,19 @@ export function keyPositionTo3D(
   half: 'left' | 'right',
   keyUnit: number = 19.05
 ): THREE.Vector3 {
-  const x = key.position.col * keyUnit - (half === 'left' ? parameters.splitDistance / 2 : -parameters.splitDistance / 2);
-  const y = -key.position.row * keyUnit;
+  // グリッド座標をベースに計算
+  let x = key.position.col * keyUnit;
+  let y = -key.position.row * keyUnit;
+  
+  // オフセットを適用（グリッドセルサイズに対する相対値）
+  const offsetX = key.position.offsetX ?? 0;
+  const offsetY = key.position.offsetY ?? 0;
+  x += offsetX * keyUnit;
+  y -= offsetY * keyUnit; // Y軸は下向きなので符号を反転
+  
+  // 左右のハーフのオフセットを適用
+  x -= (half === 'left' ? parameters.splitDistance / 2 : -parameters.splitDistance / 2);
+  
   const z = 0;
   return new THREE.Vector3(x, y, z);
 }
